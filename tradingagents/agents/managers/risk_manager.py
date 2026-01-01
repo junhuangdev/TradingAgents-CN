@@ -53,55 +53,20 @@ def create_risk_manager(llm, memory):
 
 专注于可操作的见解和持续改进。建立在过去经验教训的基础上，批判性地评估所有观点，确保每个决策都能带来更好的结果。请用中文撰写所有分析内容和建议。"""
 
-        # 📊 统计 prompt 大小
-        prompt_length = len(prompt)
-        # 粗略估算 token 数量（中文约 1.5-2 字符/token，英文约 4 字符/token）
-        estimated_tokens = int(prompt_length / 1.8)  # 保守估计
-
-        logger.info(f"📊 [Risk Manager] Prompt 统计:")
-        logger.info(f"   - 辩论历史长度: {len(history)} 字符")
-        logger.info(f"   - 交易员计划长度: {len(trader_plan)} 字符")
-        logger.info(f"   - 历史记忆长度: {len(past_memory_str)} 字符")
-        logger.info(f"   - 总 Prompt 长度: {prompt_length} 字符")
-        logger.info(f"   - 估算输入 Token: ~{estimated_tokens} tokens")
-
         # 增强的LLM调用，包含错误处理和重试机制
         max_retries = 3
         retry_count = 0
         response_content = ""
-
+        
         while retry_count < max_retries:
             try:
                 logger.info(f"🔄 [Risk Manager] 调用LLM生成交易决策 (尝试 {retry_count + 1}/{max_retries})")
-
-                # ⏱️ 记录开始时间
-                start_time = time.time()
-
                 response = llm.invoke(prompt)
-
-                # ⏱️ 记录结束时间
-                elapsed_time = time.time() - start_time
                 
                 if response and hasattr(response, 'content') and response.content:
                     response_content = response.content.strip()
-
-                    # 📊 统计响应信息
-                    response_length = len(response_content)
-                    estimated_output_tokens = int(response_length / 1.8)
-
-                    # 尝试获取实际的 token 使用情况（如果 LLM 返回了）
-                    usage_info = ""
-                    if hasattr(response, 'response_metadata') and response.response_metadata:
-                        metadata = response.response_metadata
-                        if 'token_usage' in metadata:
-                            token_usage = metadata['token_usage']
-                            usage_info = f", 实际Token: 输入={token_usage.get('prompt_tokens', 'N/A')} 输出={token_usage.get('completion_tokens', 'N/A')} 总计={token_usage.get('total_tokens', 'N/A')}"
-
-                    logger.info(f"⏱️ [Risk Manager] LLM调用耗时: {elapsed_time:.2f}秒")
-                    logger.info(f"📊 [Risk Manager] 响应统计: {response_length} 字符, 估算~{estimated_output_tokens} tokens{usage_info}")
-
                     if len(response_content) > 10:  # 确保响应有实质内容
-                        logger.info(f"✅ [Risk Manager] LLM调用成功")
+                        logger.info(f"✅ [Risk Manager] LLM调用成功，生成决策长度: {len(response_content)} 字符")
                         break
                     else:
                         logger.warning(f"⚠️ [Risk Manager] LLM响应内容过短: {len(response_content)} 字符")
@@ -109,11 +74,9 @@ def create_risk_manager(llm, memory):
                 else:
                     logger.warning(f"⚠️ [Risk Manager] LLM响应为空或无效")
                     response_content = ""
-
+                    
             except Exception as e:
-                elapsed_time = time.time() - start_time
                 logger.error(f"❌ [Risk Manager] LLM调用失败 (尝试 {retry_count + 1}): {str(e)}")
-                logger.error(f"⏱️ [Risk Manager] 失败前耗时: {elapsed_time:.2f}秒")
                 response_content = ""
             
             retry_count += 1

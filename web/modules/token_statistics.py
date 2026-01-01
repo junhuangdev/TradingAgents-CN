@@ -417,7 +417,7 @@ def export_statistics_data(days: int):
         # 提供下载
         st.download_button(
             label="📥 下载统计数据",
-            data=json.dumps(export_data, ensure_ascii=False, indent=2, default=str),
+            data=json.dumps(export_data, ensure_ascii=False, indent=2),
             file_name=filename,
             mime="application/json"
         )

@@ -98,20 +98,48 @@ def extract_risk_assessment(state):
         return None
 
 def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, llm_provider, llm_model, market_type="美股", progress_callback=None):
-    """执行股票分析
+    """Purpose: Execute end-to-end stock analysis with provider-specific LLM config.
+
+    Remarks:
+    - Validates environment variables per selected provider (e.g., DeepSeek/OpenAI).
+    - Persists token usage when tracking is enabled; non-blocking UI updates.
+    - Assumes external data keys (e.g., FINNHUB_API_KEY) are required for market data.
 
     Args:
-        stock_symbol: 股票代码
-        analysis_date: 分析日期
-        analysts: 分析师列表
-        research_depth: 研究深度
-        llm_provider: LLM提供商 (dashscope/deepseek/google)
-        llm_model: 大模型名称
-        progress_callback: 进度回调函数，用于更新UI状态
+    - stock_symbol: Target stock symbol.
+    - analysis_date: Date used for the analysis window.
+    - analysts: Enabled analyst roles participating in debate.
+    - research_depth: Analysis depth level impacting model/rounds.
+    - llm_provider: Active LLM provider identifier.
+    - llm_model: Selected model name under the provider.
+    - market_type: Market category (A股/港股/美股).
+    - progress_callback: Optional callback for progress messages.
+
+    Returns:
+    - A result dict including decision, state, usage info, and metadata.
+
+    Throws:
+    - ValueError when provider-specific API keys or FINNHUB_API_KEY are missing.
+
+    Example:
+    - run_stock_analysis("AAPL", "2025-11-14", ["market","fundamentals"], 3, "deepseek", "deepseek-chat")
     """
 
     def update_progress(message, step=None, total_steps=None):
-        """更新进度"""
+        """Purpose: Emit progress updates to UI and logs.
+
+        Remarks:
+        - Safe to call frequently; avoids raising.
+        - Uses provided callback when available; falls back to logging.
+
+        Params:
+        - message: Human-readable progress text.
+        - step: Optional current step number.
+        - total_steps: Optional total steps for coarse progress.
+
+        Returns:
+        - None; communicates via callback and logger.
+        """
         if progress_callback:
             progress_callback(message, step, total_steps)
         logger.info(f"[进度] {message}")
@@ -195,28 +223,42 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
     if TOKEN_TRACKING_ENABLED:
         estimated_input = 2000 * len(analysts)  # 估算每个分析师2000个输入token
         estimated_output = 1000 * len(analysts)  # 估算每个分析师1000个输出token
-        estimated_cost_result = token_tracker.estimate_cost(llm_provider, llm_model, estimated_input, estimated_output)
-
-        # estimate_cost 返回 tuple (cost, currency)
-        if isinstance(estimated_cost_result, tuple):
-            estimated_cost, currency = estimated_cost_result
-        else:
-            estimated_cost = estimated_cost_result
-            currency = "CNY"
+        estimated_cost = token_tracker.estimate_cost(llm_provider, llm_model, estimated_input, estimated_output)
 
         update_progress(f"💰 预估分析成本: ¥{estimated_cost:.4f}")
 
     # 验证环境变量
     update_progress("检查环境变量配置...")
-    dashscope_key = os.getenv("DASHSCOPE_API_KEY")
     finnhub_key = os.getenv("FINNHUB_API_KEY")
 
-    logger.info(f"环境变量检查:")
-    logger.info(f"  DASHSCOPE_API_KEY: {'已设置' if dashscope_key else '未设置'}")
+    # 针对提供商的 API Key 检查
+    provider_key_map = {
+        "dashscope": "DASHSCOPE_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+        "siliconflow": "SILICONFLOW_API_KEY",
+        "google": "GOOGLE_API_KEY",
+        "qianfan": "QIANFAN_API_KEY",
+        "custom_openai": "CUSTOM_OPENAI_API_KEY",
+    }
+
+    key_name = provider_key_map.get(llm_provider)
+    provider_key = None
+
+    if llm_provider == "custom_openai":
+        # 自定义端点支持 session_state 中的密钥或环境变量
+        provider_key = os.getenv(key_name) or (st.session_state.get("custom_openai_api_key") if 'st' in globals() else None)
+    elif key_name:
+        provider_key = os.getenv(key_name)
+
+    logger.info("环境变量检查:")
+    if key_name:
+        logger.info(f"  {key_name}: {'已设置' if provider_key else '未设置'}")
     logger.info(f"  FINNHUB_API_KEY: {'已设置' if finnhub_key else '未设置'}")
 
-    if not dashscope_key:
-        raise ValueError("DASHSCOPE_API_KEY 环境变量未设置")
+    if key_name and not provider_key:
+        raise ValueError(f"{key_name} 环境变量未设置")
     if not finnhub_key:
         raise ValueError("FINNHUB_API_KEY 环境变量未设置")
 
@@ -237,8 +279,8 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
         if research_depth == 1:  # 1级 - 快速分析
             config["max_debate_rounds"] = 1
             config["max_risk_discuss_rounds"] = 1
-            # 禁用记忆以加速
-            config["memory_enabled"] = False
+            # 保持内存功能启用，因为内存操作开销很小但能显著提升分析质量
+            config["memory_enabled"] = True
 
             # 统一使用在线工具，避免离线工具的各种问题
             config["online_tools"] = True  # 所有市场都使用统一工具
@@ -313,7 +355,7 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
         if llm_provider == "dashscope":
             config["backend_url"] = "https://dashscope.aliyuncs.com/api/v1"
         elif llm_provider == "deepseek":
-            config["backend_url"] = "https://api.deepseek.com"
+            config["backend_url"] = "https://api.deepseek.com/v1"
         elif llm_provider == "qianfan":
             # 千帆（文心一言）配置
             config["backend_url"] = "https://aip.baidubce.com"
@@ -501,9 +543,6 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
             if usage_record:
                 update_progress(f"💰 记录使用成本: ¥{usage_record.cost:.4f}")
 
-        # 从决策中提取模型信息
-        model_info = decision.get('model_info', 'Unknown') if isinstance(decision, dict) else 'Unknown'
-
         results = {
             'stock_symbol': stock_symbol,
             'analysis_date': analysis_date,
@@ -511,7 +550,6 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
             'research_depth': research_depth,
             'llm_provider': llm_provider,
             'llm_model': llm_model,
-            'model_info': model_info,  # 🔥 添加模型信息字段
             'state': state,
             'decision': decision,
             'success': True,
@@ -721,33 +759,18 @@ def format_analysis_results(results):
         'final_trade_decision'      # 最终交易决策
     ]
     
-    # 添加调试信息
-    logger.debug(f"🔍 [格式化调试] 原始state中的键: {list(state.keys())}")
-    for key in state.keys():
-        if isinstance(state[key], str):
-            logger.debug(f"🔍 [格式化调试] {key}: 字符串长度 {len(state[key])}")
-        elif isinstance(state[key], dict):
-            logger.debug(f"🔍 [格式化调试] {key}: 字典，包含键 {list(state[key].keys())}")
-        else:
-            logger.debug(f"🔍 [格式化调试] {key}: {type(state[key])}")
-
     for key in analysis_keys:
         if key in state:
             # 对文本内容进行中文化处理
             content = state[key]
             if isinstance(content, str):
                 content = translate_analyst_labels(content)
-                logger.debug(f"🔍 [格式化调试] 处理字符串字段 {key}: 长度 {len(content)}")
-            elif isinstance(content, dict):
-                logger.debug(f"🔍 [格式化调试] 处理字典字段 {key}: 包含键 {list(content.keys())}")
             formatted_state[key] = content
         elif key == 'risk_assessment':
             # 特殊处理：从 risk_debate_state 生成 risk_assessment
             risk_assessment = extract_risk_assessment(state)
             if risk_assessment:
                 formatted_state[key] = risk_assessment
-        else:
-            logger.debug(f"🔍 [格式化调试] 缺失字段: {key}")
     
     return {
         'stock_symbol': results['stock_symbol'],

@@ -30,7 +30,25 @@ def get_version():
         return "unknown"
 
 def render_sidebar():
-    """渲染侧边栏配置"""
+    """Purpose: Render the sidebar for LLM configuration and persistence.
+
+    Remarks:
+    - Defaults provider to DeepSeek when no prior selection exists.
+    - Reads/writes selections via localStorage and Streamlit session state.
+    - UI uses Streamlit components; ensure accessibility labels are preserved.
+
+    Args:
+    - None; reads global session state and persistence.
+
+    Returns:
+    - Renders provider/model controls and persists choices; no direct return.
+
+    Raises:
+    - Does not raise; validation is handled by the main analysis runner.
+
+    Example:
+    - render_sidebar()  # Renders provider and model selectors
+    """
 
     # 添加localStorage支持的JavaScript
     st.markdown("""
@@ -179,7 +197,7 @@ def render_sidebar():
         <div id="localStorage-reader" style="display: none;">
             <script>
             // 从localStorage读取设置并发送给Streamlit
-            const provider = loadFromLocalStorage('llm_provider', 'dashscope');
+            const provider = loadFromLocalStorage('llm_provider', 'deepseek');
             const category = loadFromLocalStorage('model_category', 'openai');
             const model = loadFromLocalStorage('llm_model', '');
 

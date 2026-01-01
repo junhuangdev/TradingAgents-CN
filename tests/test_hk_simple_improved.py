@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """
-测试改进的港股工具（简版，直接导入）
+简化的港股工具测试
 """
 
 import os
 import sys
 import time
+import json
 
 # 添加项目根目录到Python路径
 project_root = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, project_root)
+
+# 直接导入改进的港股工具（避免复杂的依赖）
+sys.path.insert(0, os.path.join(project_root, 'tradingagents', 'dataflows'))
 
 def test_hk_provider_direct():
     """直接测试港股提供器"""
@@ -52,7 +56,21 @@ def test_hk_provider_direct():
             except Exception as e:
                 print(f"   {symbol:10} -> ❌ 错误: {e}")
         
-        print(f"\n✅ 成功获取具体名称的数量: {success_count}")
+        print(f"\n📊 成功获取具体名称: {success_count}/{len(test_symbols)}")
+        
+        print(f"\n📊 测试港股信息获取:")
+        for symbol in test_symbols[:3]:  # 只测试前3个
+            try:
+                stock_info = provider.get_stock_info(symbol)
+                print(f"   {symbol}:")
+                print(f"      名称: {stock_info['name']}")
+                print(f"      货币: {stock_info['currency']}")
+                print(f"      交易所: {stock_info['exchange']}")
+                print(f"      来源: {stock_info['source']}")
+                
+            except Exception as e:
+                print(f"   {symbol} -> ❌ 错误: {e}")
+        
         return True
         
     except Exception as e:
@@ -71,12 +89,8 @@ def test_cache_direct():
         
         provider = ImprovedHKStockProvider()
         
-        # 使用新的缓存路径
-        cache_dir = os.path.join('data', 'cache', 'hk')
-        os.makedirs(cache_dir, exist_ok=True)
-        cache_file = os.path.join(cache_dir, 'hk_stock_cache.json')
-        
         # 清理可能存在的缓存文件
+        cache_file = "hk_stock_cache.json"
         if os.path.exists(cache_file):
             os.remove(cache_file)
             print("🗑️ 清理旧缓存文件")
@@ -110,7 +124,6 @@ def test_cache_direct():
             print("✅ 缓存文件已创建")
             
             # 读取缓存内容
-            import json
             with open(cache_file, 'r', encoding='utf-8') as f:
                 cache_data = json.load(f)
             

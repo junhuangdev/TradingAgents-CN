@@ -119,10 +119,24 @@ class AsyncProgressDisplay:
                                   f"**当前步骤**: {step_name}\n\n"
                                   f"**步骤说明**: {step_description}")
             
-            # 时间信息 - 直接使用后端计算的时间数据
-            real_elapsed_time = progress_data.get('elapsed_time', 0)
-            remaining_time = progress_data.get('remaining_time', 0)
+            # 时间信息 - 实时计算已用时间
+            start_time = progress_data.get('start_time', 0)
             estimated_total_time = progress_data.get('estimated_total_time', 0)
+
+            # 计算已用时间
+            import time
+            if status == 'completed':
+                # 已完成的分析使用存储的最终耗时
+                real_elapsed_time = progress_data.get('elapsed_time', 0)
+            elif start_time > 0:
+                # 进行中的分析使用实时计算
+                real_elapsed_time = time.time() - start_time
+            else:
+                # 备用方案
+                real_elapsed_time = progress_data.get('elapsed_time', 0)
+
+            # 重新计算剩余时间
+            remaining_time = max(estimated_total_time - real_elapsed_time, 0)
             
             if status == 'completed':
                 self.time_info.success(f"⏱️ **已用时间**: {format_time(real_elapsed_time)} | **总耗时**: {format_time(real_elapsed_time)}")
@@ -241,10 +255,24 @@ def streamlit_auto_refresh_progress(analysis_id: str, refresh_interval: int = 2)
                f"**当前步骤**: {step_name}\n\n"
                f"**步骤说明**: {step_description}")
 
-    # 时间信息 - 直接使用后端计算的时间数据
-    elapsed_time = progress_data.get('elapsed_time', 0)
-    remaining_time = progress_data.get('remaining_time', 0)
+    # 时间信息 - 实时计算已用时间
+    start_time = progress_data.get('start_time', 0)
     estimated_total_time = progress_data.get('estimated_total_time', 0)
+
+    # 计算已用时间
+    import time
+    if status == 'completed':
+        # 已完成的分析使用存储的最终耗时
+        elapsed_time = progress_data.get('elapsed_time', 0)
+    elif start_time > 0:
+        # 进行中的分析使用实时计算
+        elapsed_time = time.time() - start_time
+    else:
+        # 备用方案
+        elapsed_time = progress_data.get('elapsed_time', 0)
+
+    # 重新计算剩余时间
+    remaining_time = max(estimated_total_time - elapsed_time, 0)
 
     if status == 'completed':
         st.success(f"⏱️ **总耗时**: {format_time(elapsed_time)}")
@@ -313,8 +341,18 @@ def display_static_progress(analysis_id: str) -> bool:
         st.metric("进度", f"{progress_percentage:.1f}%")
 
     with col3:
-        # 已用时间 - 直接使用后端计算的时间数据
-        elapsed_time = progress_data.get('elapsed_time', 0)
+        # 计算已用时间
+        start_time = progress_data.get('start_time', 0)
+        import time
+        if status == 'completed':
+            # 已完成的分析使用存储的最终耗时
+            elapsed_time = progress_data.get('elapsed_time', 0)
+        elif start_time > 0:
+            # 进行中的分析使用实时计算
+            elapsed_time = time.time() - start_time
+        else:
+            # 备用方案
+            elapsed_time = progress_data.get('elapsed_time', 0)
         st.metric("已用时间", format_time(elapsed_time))
 
     with col4:
@@ -466,37 +504,50 @@ def display_static_progress_with_controls(analysis_id: str, show_refresh_control
     current_step_name = progress_data.get('current_step_name', '准备阶段')
     progress_percentage = progress_data.get('progress_percentage', 0.0)
 
-    # 时间信息 - 直接使用后端计算的时间数据
-    elapsed_time = progress_data.get('elapsed_time', 0)
-    remaining_time = progress_data.get('remaining_time', 0)
+    # 计算已用时间
+    start_time = progress_data.get('start_time', 0)
     estimated_total_time = progress_data.get('estimated_total_time', 0)
+    import time
+    if status == 'completed':
+        # 已完成的分析使用存储的最终耗时
+        elapsed_time = progress_data.get('elapsed_time', 0)
+    elif start_time > 0:
+        # 进行中的分析使用实时计算
+        elapsed_time = time.time() - start_time
+    else:
+        # 备用方案
+        elapsed_time = progress_data.get('elapsed_time', 0)
+
+    # 重新计算剩余时间
+    remaining_time = max(estimated_total_time - elapsed_time, 0)
     current_step_description = progress_data.get('current_step_description', '初始化分析引擎')
     last_message = progress_data.get('last_message', '准备开始分析')
 
-    # 简化显示：只显示核心信息，避免重复
+    # 显示当前步骤
+    st.write(f"**当前步骤**: {current_step_name}")
+
+    # 显示进度条和统计信息
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("进度", f"{progress_percentage:.1f}%")
+
+    with col2:
+        st.metric("已用时间", format_time(elapsed_time))
+
+    with col3:
+        if status == 'completed':
+            st.metric("预计剩余", "已完成")
+        elif status == 'failed':
+            st.metric("预计剩余", "已中断")
+        else:
+            st.metric("预计剩余", format_time(remaining_time))
+
     # 显示进度条
     st.progress(min(progress_percentage / 100.0, 1.0))
 
-    # 显示当前状态信息
-    status_icon = {
-        'running': '🔄',
-        'completed': '✅',
-        'failed': '❌'
-    }.get(status, '🔄')
-
-    st.info(f"{status_icon} **{current_step_name}** - {current_step_description}")
-
-    # 显示时间信息（简化版）
-    time_col1, time_col2 = st.columns(2)
-    with time_col1:
-        st.caption(f"⏱️ 已用时间: {format_time(elapsed_time)}")
-    with time_col2:
-        if status == 'completed':
-            st.caption("✅ 分析完成")
-        elif status == 'failed':
-            st.caption("❌ 分析失败")
-        else:
-            st.caption(f"⏳ 预计剩余: {format_time(remaining_time)}")
+    # 显示当前任务
+    st.write(f"**当前任务**: {current_step_description}")
 
     # 显示当前状态
     status_icon = {

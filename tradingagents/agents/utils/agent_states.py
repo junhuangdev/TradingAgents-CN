@@ -65,12 +65,6 @@ class AgentState(MessagesState):
     ]
     fundamentals_report: Annotated[str, "Report from the Fundamentals Researcher"]
 
-    # 🔧 死循环修复: 工具调用计数器
-    market_tool_call_count: Annotated[int, "Market analyst tool call counter"]
-    news_tool_call_count: Annotated[int, "News analyst tool call counter"]
-    sentiment_tool_call_count: Annotated[int, "Social media analyst tool call counter"]
-    fundamentals_tool_call_count: Annotated[int, "Fundamentals analyst tool call counter"]
-
     # researcher team discussion step
     investment_debate_state: Annotated[
         InvestDebateState, "Current state of the debate on if to invest or not"

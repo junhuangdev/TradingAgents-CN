@@ -1627,8 +1627,7 @@ def save_analysis_result(analysis_id: str, stock_symbol: str, analysts: List[str
                     'stock_symbol': result_entry.get('stock_symbol', ''),
                     'analysts': result_entry.get('analysts', []),
                     'research_depth': result_entry.get('research_depth', 1),
-                    'summary': result_entry.get('summary', ''),
-                    'model_info': result_entry.get('model_info', 'Unknown')  # 🔥 添加模型信息字段
+                    'summary': result_entry.get('summary', '')
                 }
 
                 # 尝试从文件系统读取报告内容

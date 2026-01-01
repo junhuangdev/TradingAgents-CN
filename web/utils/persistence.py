@@ -39,13 +39,25 @@ class ModelPersistence:
             logger.warning(f"⚠️ [Persistence] URL参数保存失败: {e}")
     
     def load_config(self):
-        """从session state或URL加载配置"""
+        """Purpose: Load model selection from URL or session state.
+
+        Remarks:
+        - Falls back to DeepSeek provider when no prior config is present.
+        - Syncs with Streamlit `st.session_state` and `st.query_params`.
+        - Avoids raising; provides safe defaults for first-run UX.
+
+        Returns:
+        - A dict containing `provider`, `category`, and `model` fields.
+
+        Example:
+        - cfg = persistence.load_config()  // returns defaults if unset
+        """
         # 首先尝试从URL参数加载
         try:
             query_params = st.query_params
             if 'provider' in query_params:
                 config = {
-                    'provider': query_params.get('provider', 'dashscope'),
+                    'provider': query_params.get('provider', 'deepseek'),
                     'category': query_params.get('category', 'openai'),
                     'model': query_params.get('model', '')
                 }
@@ -62,7 +74,7 @@ class ModelPersistence:
         
         # 返回默认配置
         default_config = {
-            'provider': 'dashscope',
+            'provider': 'deepseek',
             'category': 'openai',
             'model': ''
         }

@@ -7,18 +7,10 @@
 import os
 import sys
 from datetime import datetime
-from zoneinfo import ZoneInfo
 
 # 导入日志模块
 from tradingagents.utils.logging_manager import get_logger
-from tradingagents.config.runtime_settings import get_timezone_name
-
 logger = get_logger('scripts')
-
-
-def now_tz():
-    """获取当前配置时区的时间"""
-    return datetime.now(ZoneInfo(get_timezone_name()))
 
 # 添加项目根目录到路径
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -98,8 +90,8 @@ def init_mongodb():
                     "china_fundamentals": 43200
                 },
                 "description": "缓存TTL配置",
-                "created_at": now_tz(),
-                "updated_at": now_tz()
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
             },
             {
                 "config_type": "llm",
@@ -113,8 +105,8 @@ def init_mongodb():
                     }
                 },
                 "description": "默认LLM模型配置",
-                "created_at": now_tz(),
-                "updated_at": now_tz()
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
             }
         ]
         
@@ -164,7 +156,7 @@ def init_redis():
         logger.info(f"⚙️ 设置缓存配置...")
         cache_config = {
             "version": "1.0",
-            "initialized_at": now_tz().isoformat(),
+            "initialized_at": datetime.utcnow().isoformat(),
             "ttl_settings": {
                 "us_stock_data": 7200,
                 "china_stock_data": 3600,
@@ -183,7 +175,7 @@ def init_redis():
             "cache_hits": 0,
             "cache_misses": 0,
             "total_requests": 0,
-            "last_reset": now_tz().isoformat()
+            "last_reset": datetime.utcnow().isoformat()
         }
         
         db_manager.cache_set("system:cache_stats", stats, ttl=86400*7)  # 7天
@@ -191,7 +183,7 @@ def init_redis():
         # 测试缓存功能
         logger.info(f"🧪 测试缓存功能...")
         test_key = "test:init"
-        test_value = {"message": "Redis初始化成功", "timestamp": now_tz().isoformat()}
+        test_value = {"message": "Redis初始化成功", "timestamp": datetime.utcnow().isoformat()}
         
         if db_manager.cache_set(test_key, test_value, ttl=60):
             retrieved_value = db_manager.cache_get(test_key)

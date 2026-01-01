@@ -79,18 +79,30 @@ def get_docker_wkhtmltopdf_args():
         '--quiet'
     ]
 
+def _binary_ok(cmd: list[str]) -> bool:
+    """检查命令是否可用并返回0退出码"""
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=10)
+        return result.returncode == 0
+    except Exception:
+        return False
+
+def _available_engine() -> str:
+    """选择可用的PDF引擎，优先wkhtmltopdf，其次weasyprint，最后default"""
+    if _binary_ok(['wkhtmltopdf', '--version']):
+        return 'wkhtmltopdf'
+    if _binary_ok(['weasyprint', '--version']):
+        return 'weasyprint'
+    return 'default'
+
 def test_docker_pdf_generation() -> bool:
-    """测试Docker环境下的PDF生成"""
+    """测试Docker环境下的PDF生成（根据可用引擎选择）"""
     if not is_docker_environment():
         return True
-    
+
     try:
         import pypandoc
 
-        
-        # 设置虚拟显示器
-        setup_xvfb_display()
-        
         # 测试内容
         test_html = """
         <html>
@@ -105,16 +117,23 @@ def test_docker_pdf_generation() -> bool:
         </body>
         </html>
         """
-        
+
         with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
             output_file = tmp.name
-        
-        # Docker环境下使用简化的参数
-        extra_args = [
-            '--pdf-engine=wkhtmltopdf',
-            '--pdf-engine-opt=--disable-smart-shrinking',
-            '--pdf-engine-opt=--quiet'
-        ]
+
+        engine = _available_engine()
+        extra_args = []
+
+        if engine == 'wkhtmltopdf':
+            # wkhtmltopdf 需要虚拟显示器
+            setup_xvfb_display()
+            extra_args = [
+                '--pdf-engine=wkhtmltopdf',
+                '--pdf-engine-opt=--disable-smart-shrinking',
+                '--pdf-engine-opt=--quiet'
+            ]
+        elif engine == 'weasyprint':
+            extra_args = ['--pdf-engine=weasyprint']
 
         pypandoc.convert_text(
             test_html,
@@ -123,16 +142,16 @@ def test_docker_pdf_generation() -> bool:
             outputfile=output_file,
             extra_args=extra_args
         )
-        
+
         # 检查文件是否生成
         if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
             os.unlink(output_file)  # 清理测试文件
-            logger.info(f"✅ Docker PDF生成测试成功")
+            logger.info(f"✅ Docker PDF生成测试成功（引擎: {engine}）")
             return True
         else:
-            logger.error(f"❌ Docker PDF生成测试失败")
+            logger.error(f"❌ Docker PDF生成测试失败（引擎: {engine}）")
             return False
-            
+
     except Exception as e:
         logger.error(f"❌ Docker PDF测试失败: {e}")
         return False
@@ -160,45 +179,58 @@ def get_docker_pdf_extra_args():
     return base_args
 
 def check_docker_pdf_dependencies():
-    """检查Docker环境下PDF生成的依赖"""
+    """检查Docker环境下PDF生成的依赖，支持weasyprint回退"""
     if not is_docker_environment():
         return True, "非Docker环境"
-    
-    missing_deps = []
-    
-    # 检查wkhtmltopdf
-    try:
-        result = subprocess.run(['wkhtmltopdf', '--version'], 
-                              capture_output=True, timeout=10)
-        if result.returncode != 0:
-            missing_deps.append('wkhtmltopdf')
-    except:
-        missing_deps.append('wkhtmltopdf')
-    
-    # 检查Xvfb
-    try:
-        result = subprocess.run(['Xvfb', '-help'], 
-                              capture_output=True, timeout=10)
-        if result.returncode not in [0, 1]:  # Xvfb -help 返回1是正常的
-            missing_deps.append('xvfb')
-    except:
-        missing_deps.append('xvfb')
-    
-    # 检查字体
+
+    wkhtmltopdf_ok = _binary_ok(['wkhtmltopdf', '--version'])
+    weasyprint_ok = _binary_ok(['weasyprint', '--version'])
+
+    # 字体检查（两种引擎都需要）
     font_paths = [
         '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
         '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
-        '/usr/share/fonts/truetype/liberation/'
+        '/usr/share/fonts/truetype/liberation/',
+        # 项目本地字体挂载位置（在docker-compose中挂载）
+        '/usr/share/fonts/tradingagents'
     ]
-    
     font_found = any(os.path.exists(path) for path in font_paths)
+
+    # 进一步检测是否存在苹方或SF Pro类字体文件
     if not font_found:
-        missing_deps.append('chinese-fonts')
-    
-    if missing_deps:
-        return False, f"缺少依赖: {', '.join(missing_deps)}"
-    
-    return True, "所有依赖已安装"
+        try:
+            candidates = []
+            for base in ['/usr/share/fonts/tradingagents']:
+                if os.path.isdir(base):
+                    for name in os.listdir(base):
+                        if name.lower().endswith(('.ttf', '.ttc', '.otf')):
+                            candidates.append(os.path.join(base, name))
+            font_found = len(candidates) > 0
+        except Exception:
+            pass
+
+    # 对wkhtmltopdf而言，Xvfb是推荐的
+    xvfb_ok = _binary_ok(['Xvfb', '-help'])
+
+    # 优先级：wkhtmltopdf -> weasyprint -> default
+    if wkhtmltopdf_ok:
+        missing = []
+        if not xvfb_ok:
+            missing.append('xvfb')
+        if not font_found:
+            missing.append('chinese-fonts')
+        if missing:
+            return False, f"缺少依赖: {', '.join(missing)}"
+        return True, "wkhtmltopdf与字体可用"
+
+    if weasyprint_ok:
+        # 使用weasyprint时无需Xvfb
+        if not font_found:
+            return False, "缺少依赖: 字体(建议挂载macOS字体或安装Noto CJK)"
+        return True, "wkhtmltopdf缺失，但已检测到weasyprint，将使用weasyprint"
+
+    # 两者都不可用
+    return False, "缺少依赖: wkhtmltopdf, weasyprint"
 
 def get_docker_status_info():
     """获取Docker环境状态信息"""

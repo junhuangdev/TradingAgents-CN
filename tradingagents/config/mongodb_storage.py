@@ -5,15 +5,13 @@ MongoDB存储适配器
 """
 
 import os
-from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
+from datetime import datetime
 from typing import Dict, List, Optional, Any
 from dataclasses import asdict
-from .usage_models import UsageRecord
+from .config_manager import UsageRecord
 
 # 导入日志模块
 from tradingagents.utils.logging_manager import get_logger
-from tradingagents.config.runtime_settings import get_timezone_name
 logger = get_logger('agents')
 
 try:
@@ -56,17 +54,9 @@ class MongoDBStorage:
     def _connect(self):
         """连接到MongoDB"""
         try:
-            # 从环境变量读取超时配置，使用合理的默认值
-            import os
-            connect_timeout = int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "30000"))
-            socket_timeout = int(os.getenv("MONGO_SOCKET_TIMEOUT_MS", "60000"))
-            server_selection_timeout = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000"))
-
             self.client = MongoClient(
                 self.connection_string,
-                serverSelectionTimeoutMS=server_selection_timeout,
-                connectTimeoutMS=connect_timeout,
-                socketTimeoutMS=socket_timeout
+                serverSelectionTimeoutMS=5000  # 5秒超时
             )
             # 测试连接
             self.client.admin.command('ping')
@@ -114,34 +104,26 @@ class MongoDBStorage:
     def save_usage_record(self, record: UsageRecord) -> bool:
         """保存单个使用记录到MongoDB"""
         if not self._connected:
-            logger.warning(f"⚠️ [MongoDB存储] 未连接，无法保存记录")
             return False
-
+        
         try:
             # 转换为字典格式
             record_dict = asdict(record)
-
+            
             # 添加MongoDB特有的字段
-            record_dict['_created_at'] = datetime.now(ZoneInfo(get_timezone_name()))
-
-            # 🔍 详细日志
-            logger.debug(f"📊 [MongoDB存储] 准备插入记录: {record.provider}/{record.model_name}, session={record.session_id}")
-            logger.debug(f"   数据库: {self.database_name}, 集合: {self.collection_name}")
-
+            record_dict['_created_at'] = datetime.now()
+            
             # 插入记录
             result = self.collection.insert_one(record_dict)
-
+            
             if result.inserted_id:
-                logger.info(f"✅ [MongoDB存储] 记录已保存: ID={result.inserted_id}, {record.provider}/{record.model_name}, ¥{record.cost:.4f}")
                 return True
             else:
-                logger.error(f"❌ [MongoDB存储] 插入失败：未返回插入ID")
+                logger.error(f"MongoDB插入失败：未返回插入ID")
                 return False
-
+                
         except Exception as e:
-            logger.error(f"❌ [MongoDB存储] 保存记录失败: {e}")
-            import traceback
-            logger.error(f"   堆栈: {traceback.format_exc()}")
+            logger.error(f"保存记录到MongoDB失败: {e}")
             return False
     
     def load_usage_records(self, limit: int = 10000, days: int = None) -> List[UsageRecord]:
@@ -154,7 +136,7 @@ class MongoDBStorage:
             query = {}
             if days:
                 from datetime import timedelta
-                cutoff_date = datetime.now(ZoneInfo(get_timezone_name())) - timedelta(days=days)
+                cutoff_date = datetime.now() - timedelta(days=days)
                 query['timestamp'] = {'$gte': cutoff_date.isoformat()}
             
             # 查询记录，按时间倒序

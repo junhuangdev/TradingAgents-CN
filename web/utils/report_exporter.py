@@ -8,6 +8,7 @@ import streamlit as st
 import json
 import os
 import logging
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -103,6 +104,29 @@ class ReportExporter:
             logger.info("🐳 检测到Docker环境，初始化PDF支持...")
             logger.info(f"🐳 检测到Docker环境，初始化PDF支持...")
             setup_xvfb_display()
+
+    def refresh_dependencies(self):
+        """在导出前动态刷新依赖可用性，避免导入时的状态被缓存"""
+        import shutil
+        # 尝试定位pandoc，并告知pypandoc
+        pandoc_path = shutil.which('pandoc')
+        if not pandoc_path and os.path.exists('/usr/bin/pandoc'):
+            pandoc_path = '/usr/bin/pandoc'
+        if pandoc_path:
+            os.environ.setdefault('PYPANDOC_PANDOC', pandoc_path)
+        try:
+            import pypandoc
+            pypandoc.get_pandoc_version()
+            self.pandoc_available = True
+        except Exception as e:
+            logger.warning(f"⚠️ 动态检测pandoc失败: {e}")
+            self.pandoc_available = False
+        # Docker环境下确保虚拟显示器
+        if self.is_docker:
+            try:
+                setup_xvfb_display()
+            except Exception as e:
+                logger.warning(f"⚠️ Xvfb刷新失败: {e}")
     
     def _clean_text_for_markdown(self, text: str) -> str:
         """清理文本中可能导致YAML解析问题的字符"""
@@ -457,10 +481,11 @@ class ReportExporter:
         logger.info(f"✅ Markdown内容生成完成，长度: {len(md_content)} 字符")
 
         # 简化的PDF引擎列表，优先使用最可能成功的
+        # 优先WeasyPrint（wkhtmltopdf在Debian Trixie/arm64不可用）
         pdf_engines = [
-            ('wkhtmltopdf', 'HTML转PDF引擎，推荐安装'),
             ('weasyprint', '现代HTML转PDF引擎'),
-            (None, '使用pandoc默认引擎')  # 不指定引擎，让pandoc自己选择
+            ('wkhtmltopdf', 'HTML转PDF引擎，推荐安装'),
+            (None, '使用pandoc默认引擎')
         ]
 
         last_error = None
@@ -475,12 +500,44 @@ class ReportExporter:
                 # 使用禁用YAML解析的参数（与Word导出一致）
                 extra_args = ['--from=markdown-yaml_metadata_block']
 
-                # 如果指定了引擎，添加引擎参数
+                # 注入CSS样式以改善PDF字体与排版（优先苹果字体）
+                try:
+                    current_file = Path(__file__)
+                    project_root = current_file.parent.parent.parent  # web/utils/report_exporter.py -> 项目根目录
+                    default_css = project_root / 'templates' / 'pdf_style.css'
+                    css_path = os.getenv('PDF_CSS_PATH', str(default_css))
+                    if css_path and os.path.exists(css_path):
+                        extra_args.append(f'--css={css_path}')
+                        logger.info(f"🔤 已注入CSS样式: {css_path}")
+                    else:
+                        logger.info("🔤 未找到CSS样式文件，使用默认样式")
+                except Exception as _e:
+                    logger.debug(f"(忽略) CSS注入失败: {_e}")
+
+                # 如果指定了引擎，优先使用绝对路径（避免PATH中找不到）
                 if engine:
-                    extra_args.append(f'--pdf-engine={engine}')
-                    logger.info(f"🔧 使用PDF引擎: {engine}")
+                    bin_env = os.getenv(f"{engine.upper()}_BIN")
+                    bin_venv = f"/srv/TradingAgents-CN/.venv/bin/{engine}"
+                    bin_path = None
+                    for candidate in [bin_env, bin_venv, shutil.which(engine)]:
+                        if candidate and os.path.exists(candidate):
+                            bin_path = candidate
+                            break
+                    if bin_path:
+                        extra_args.append(f'--pdf-engine={bin_path}')
+                        logger.info(f"🔧 使用PDF引擎: {engine} ({bin_path})")
+                    else:
+                        extra_args.append(f'--pdf-engine={engine}')
+                        logger.info(f"🔧 使用PDF引擎: {engine} (PATH查找)")
                 else:
-                    logger.info(f"🔧 使用默认PDF引擎")
+                    logger.info("🔧 使用默认PDF引擎")
+
+                # Docker环境下，为wkhtmltopdf注入必要参数
+                if DOCKER_ADAPTER_AVAILABLE and self.is_docker and engine == 'wkhtmltopdf':
+                    try:
+                        extra_args = get_docker_pdf_extra_args(extra_args)
+                    except Exception as _e:
+                        logger.debug(f"(忽略) Docker PDF参数注入失败: {_e}")
 
                 logger.info(f"🔧 PDF参数: {extra_args}")
 
@@ -547,6 +604,11 @@ class ReportExporter:
         logger.info(f"🚀 开始导出报告: format={format_type}")
         logger.info(f"📊 导出状态检查:")
         logger.info(f"  - export_available: {self.export_available}")
+        # 导出前动态刷新一次依赖状态
+        try:
+            self.refresh_dependencies()
+        except Exception as e:
+            logger.warning(f"⚠️ 刷新依赖状态异常: {e}")
         logger.info(f"  - pandoc_available: {self.pandoc_available}")
         logger.info(f"  - is_docker: {self.is_docker}")
 
@@ -902,6 +964,12 @@ def render_export_buttons(results: Dict[str, Any]):
 
     if not results:
         return
+
+    # 在渲染按钮前刷新依赖状态，避免容器运行期安装后仍显示不可用
+    try:
+        report_exporter.refresh_dependencies()
+    except Exception as e:
+        logger.warning(f"⚠️ 未能刷新导出依赖状态: {e}")
 
     st.markdown("---")
     st.subheader("📤 导出报告")

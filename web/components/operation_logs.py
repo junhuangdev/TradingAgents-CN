@@ -12,10 +12,6 @@ from typing import Dict, List, Any
 import json
 import os
 from pathlib import Path
-from zoneinfo import ZoneInfo
-
-# 时区常量
-CHINA_TZ = ZoneInfo('Asia/Shanghai')
 
 def get_operation_logs_dir():
     """获取操作日志目录"""
@@ -382,8 +378,7 @@ def render_logs_list(logs: List[Dict[str, Any]]):
                             timestamp = dt.timestamp()
                         except:
                             timestamp = 0
-                # 使用中国时区（UTC+8）
-                time_str = datetime.fromtimestamp(timestamp, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S')
+                time_str = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
             except:
                 time_str = 'unknown'
             
@@ -440,8 +435,7 @@ def render_logs_export(logs: List[Dict[str, Any]]):
                                     timestamp = dt.timestamp()
                                 except:
                                     timestamp = 0
-                        # 使用中国时区（UTC+8）
-                        time_str = datetime.fromtimestamp(timestamp, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S')
+                        time_str = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
                     except:
                         time_str = 'unknown'
                     
@@ -495,8 +489,7 @@ def render_logs_export(logs: List[Dict[str, Any]]):
                                     timestamp = dt.timestamp()
                                 except:
                                     timestamp = 0
-                        # 使用中国时区（UTC+8）
-                        time_str = datetime.fromtimestamp(timestamp, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S')
+                        time_str = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
                     except:
                         time_str = 'unknown'
                     

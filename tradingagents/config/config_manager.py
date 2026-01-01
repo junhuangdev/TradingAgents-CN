@@ -2,60 +2,65 @@
 """
 配置管理器
 管理API密钥、模型配置、费率设置等
-
-⚠️ DEPRECATED: 此模块已废弃，将在 2026-03-31 后移除
-   请使用新的配置系统: app.services.config_service.ConfigService
-   迁移指南: docs/DEPRECATION_NOTICE.md
-   迁移脚本: scripts/migrate_config_to_db.py
 """
 
 import json
 import os
 import re
-import warnings
 from datetime import datetime
-from zoneinfo import ZoneInfo
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from dotenv import load_dotenv
-
-# 发出废弃警告
-warnings.warn(
-    "ConfigManager is deprecated and will be removed in version 2.0 (2026-03-31). "
-    "Please use app.services.config_service.ConfigService instead. "
-    "See docs/DEPRECATION_NOTICE.md for migration guide.",
-    DeprecationWarning,
-    stacklevel=2
-)
 
 # 导入统一日志系统
 from tradingagents.utils.logging_init import get_logger
 
 # 导入日志模块
 from tradingagents.utils.logging_manager import get_logger
-# 运行时设置：读取系统时区
-from tradingagents.config.runtime_settings import get_timezone_name
 logger = get_logger('agents')
-
-# 导入数据模型（避免循环导入）
-from .usage_models import UsageRecord, ModelConfig, PricingConfig
 
 try:
     from .mongodb_storage import MongoDBStorage
     MONGODB_AVAILABLE = True
-except ImportError as e:
-    logger.error(f"❌ [ConfigManager] 导入 MongoDBStorage 失败 (ImportError): {e}")
-    import traceback
-    logger.error(f"   堆栈: {traceback.format_exc()}")
+except ImportError:
     MONGODB_AVAILABLE = False
     MongoDBStorage = None
-except Exception as e:
-    logger.error(f"❌ [ConfigManager] 导入 MongoDBStorage 失败 (Exception): {e}")
-    import traceback
-    logger.error(f"   堆栈: {traceback.format_exc()}")
-    MONGODB_AVAILABLE = False
-    MongoDBStorage = None
+
+
+@dataclass
+class ModelConfig:
+    """模型配置"""
+    provider: str  # 供应商：dashscope, openai, google, etc.
+    model_name: str  # 模型名称
+    api_key: str  # API密钥
+    base_url: Optional[str] = None  # 自定义API地址
+    max_tokens: int = 4000  # 最大token数
+    temperature: float = 0.7  # 温度参数
+    enabled: bool = True  # 是否启用
+
+
+@dataclass
+class PricingConfig:
+    """定价配置"""
+    provider: str  # 供应商
+    model_name: str  # 模型名称
+    input_price_per_1k: float  # 输入token价格（每1000个token）
+    output_price_per_1k: float  # 输出token价格（每1000个token）
+    currency: str = "CNY"  # 货币单位
+
+
+@dataclass
+class UsageRecord:
+    """使用记录"""
+    timestamp: str  # 时间戳
+    provider: str  # 供应商
+    model_name: str  # 模型名称
+    input_tokens: int  # 输入token数
+    output_tokens: int  # 输出token数
+    cost: float  # 成本
+    session_id: str  # 会话ID
+    analysis_type: str  # 分析类型
 
 
 class ConfigManager:
@@ -86,14 +91,7 @@ class ConfigManager:
         env_file = project_root / ".env"
 
         if env_file.exists():
-            # 🔧 [修复] override=False 确保环境变量优先级高于 .env 文件
-            # 这样 Docker 容器中的环境变量不会被 .env 文件中的占位符覆盖
-            logger.info(f"🔍 [ConfigManager] 加载 .env 文件: {env_file}")
-            logger.info(f"🔍 [ConfigManager] 加载前 DASHSCOPE_API_KEY: {'有值' if os.getenv('DASHSCOPE_API_KEY') else '空'}")
-
-            load_dotenv(env_file, override=False)
-
-            logger.info(f"🔍 [ConfigManager] 加载后 DASHSCOPE_API_KEY: {'有值' if os.getenv('DASHSCOPE_API_KEY') else '空'}")
+            load_dotenv(env_file, override=True)
 
     def _get_env_api_key(self, provider: str) -> str:
         """从环境变量获取API密钥"""
@@ -151,47 +149,31 @@ class ConfigManager:
     
     def _init_mongodb_storage(self):
         """初始化MongoDB存储"""
-        logger.info("🔧 [ConfigManager] 开始初始化 MongoDB 存储...")
-
         if not MONGODB_AVAILABLE:
-            logger.warning("⚠️ [ConfigManager] pymongo 未安装，无法使用 MongoDB 存储")
             return
-
+        
         # 检查是否启用MongoDB存储
-        use_mongodb_env = os.getenv("USE_MONGODB_STORAGE", "false")
-        use_mongodb = use_mongodb_env.lower() == "true"
-
-        logger.info(f"🔍 [ConfigManager] USE_MONGODB_STORAGE={use_mongodb_env} (解析为: {use_mongodb})")
-
+        use_mongodb = os.getenv("USE_MONGODB_STORAGE", "false").lower() == "true"
         if not use_mongodb:
-            logger.info("ℹ️ [ConfigManager] MongoDB 存储未启用，将使用 JSON 文件存储")
             return
-
+        
         try:
             connection_string = os.getenv("MONGODB_CONNECTION_STRING")
             database_name = os.getenv("MONGODB_DATABASE_NAME", "tradingagents")
-
-            logger.info(f"🔍 [ConfigManager] MONGODB_CONNECTION_STRING={'已设置' if connection_string else '未设置'}")
-            logger.info(f"🔍 [ConfigManager] MONGODB_DATABASE_NAME={database_name}")
-
-            if not connection_string:
-                logger.error("❌ [ConfigManager] MONGODB_CONNECTION_STRING 未设置，无法初始化 MongoDB 存储")
-                return
-
-            logger.info(f"🔄 [ConfigManager] 正在创建 MongoDBStorage 实例...")
+            
             self.mongodb_storage = MongoDBStorage(
                 connection_string=connection_string,
                 database_name=database_name
             )
-
+            
             if self.mongodb_storage.is_connected():
-                logger.info(f"✅ [ConfigManager] MongoDB存储已启用: {database_name}.token_usage")
+                logger.info("✅ MongoDB存储已启用")
             else:
                 self.mongodb_storage = None
-                logger.warning("⚠️ [ConfigManager] MongoDB连接失败，将使用JSON文件存储")
+                logger.warning("⚠️ MongoDB连接失败，将使用JSON文件存储")
 
         except Exception as e:
-            logger.error(f"❌ [ConfigManager] MongoDB初始化失败: {e}", exc_info=True)
+            logger.error(f"❌ MongoDB初始化失败: {e}", exc_info=True)
             self.mongodb_storage = None
 
     def _init_default_configs(self):
@@ -387,64 +369,43 @@ class ConfigManager:
     def add_usage_record(self, provider: str, model_name: str, input_tokens: int,
                         output_tokens: int, session_id: str, analysis_type: str = "stock_analysis"):
         """添加使用记录"""
-        # 计算成本和货币单位
-        cost, currency = self.calculate_cost(provider, model_name, input_tokens, output_tokens)
-
+        # 计算成本
+        cost = self.calculate_cost(provider, model_name, input_tokens, output_tokens)
+        
         record = UsageRecord(
-            timestamp=datetime.now(ZoneInfo(get_timezone_name())).isoformat(),
+            timestamp=datetime.now().isoformat(),
             provider=provider,
             model_name=model_name,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost=cost,
-            currency=currency,
             session_id=session_id,
             analysis_type=analysis_type
         )
-
-        # 🔍 详细日志：记录保存位置
-        logger.info(f"💾 [Token记录] 准备保存: {provider}/{model_name}, 输入={input_tokens}, 输出={output_tokens}, 成本=¥{cost:.4f}, session={session_id}")
-
+        
         # 优先使用MongoDB存储
         if self.mongodb_storage and self.mongodb_storage.is_connected():
-            logger.info(f"📊 [Token记录] 使用 MongoDB 存储 (数据库: {self.mongodb_storage.database_name}, 集合: {self.mongodb_storage.collection_name})")
             success = self.mongodb_storage.save_usage_record(record)
             if success:
-                logger.info(f"✅ [Token记录] MongoDB 保存成功: {provider}/{model_name}")
                 return record
             else:
-                logger.error(f"⚠️ [Token记录] MongoDB保存失败，回退到JSON文件存储")
-        else:
-            # 🔍 详细日志：为什么没有使用MongoDB
-            if self.mongodb_storage is None:
-                logger.warning(f"⚠️ [Token记录] MongoDB存储未初始化 (mongodb_storage=None)")
-                logger.warning(f"   💡 请检查环境变量: USE_MONGODB_STORAGE={os.getenv('USE_MONGODB_STORAGE', '未设置')}")
-            elif not self.mongodb_storage.is_connected():
-                logger.warning(f"⚠️ [Token记录] MongoDB未连接 (is_connected=False)")
-
-            logger.info(f"📄 [Token记录] 使用 JSON 文件存储: {self.usage_file}")
-
+                logger.error(f"⚠️ MongoDB保存失败，回退到JSON文件存储")
+        
         # 回退到JSON文件存储
         records = self.load_usage_records()
         records.append(record)
-
+        
         # 限制记录数量
         settings = self.load_settings()
         max_records = settings.get("max_usage_records", 10000)
         if len(records) > max_records:
             records = records[-max_records:]
-
+        
         self.save_usage_records(records)
-        logger.info(f"✅ [Token记录] JSON 文件保存成功: {self.usage_file}")
         return record
     
-    def calculate_cost(self, provider: str, model_name: str, input_tokens: int, output_tokens: int) -> tuple[float, str]:
-        """
-        计算使用成本
-
-        Returns:
-            tuple[float, str]: (成本, 货币单位)
-        """
+    def calculate_cost(self, provider: str, model_name: str, input_tokens: int, output_tokens: int) -> float:
+        """计算使用成本"""
         pricing_configs = self.load_pricing()
 
         for pricing in pricing_configs:
@@ -452,7 +413,7 @@ class ConfigManager:
                 input_cost = (input_tokens / 1000) * pricing.input_price_per_1k
                 output_cost = (output_tokens / 1000) * pricing.output_price_per_1k
                 total_cost = input_cost + output_cost
-                return round(total_cost, 6), pricing.currency
+                return round(total_cost, 6)
 
         # 只在找不到配置时输出调试信息
         logger.warning(f"⚠️ [calculate_cost] 未找到匹配的定价配置: {provider}/{model_name}")
@@ -460,7 +421,7 @@ class ConfigManager:
         for pricing in pricing_configs:
             logger.debug(f"⚠️ [calculate_cost]   - {pricing.provider}/{pricing.model_name}")
 
-        return 0.0, "CNY"
+        return 0.0
     
     def load_settings(self) -> Dict[str, Any]:
         """加载设置，合并.env中的配置"""
@@ -699,7 +660,7 @@ class TokenTracker:
                    output_tokens: int, session_id: str = None, analysis_type: str = "stock_analysis"):
         """跟踪Token使用"""
         if session_id is None:
-            session_id = f"session_{datetime.now(ZoneInfo(get_timezone_name())).strftime('%Y%m%d_%H%M%S')}"
+            session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
         # 检查是否启用成本跟踪
         settings = self.config_manager.load_settings()
@@ -744,13 +705,8 @@ class TokenTracker:
         return session_cost
 
     def estimate_cost(self, provider: str, model_name: str, estimated_input_tokens: int,
-                     estimated_output_tokens: int) -> tuple[float, str]:
-        """
-        估算成本
-
-        Returns:
-            tuple[float, str]: (成本, 货币单位)
-        """
+                     estimated_output_tokens: int) -> float:
+        """估算成本"""
         return self.config_manager.calculate_cost(
             provider, model_name, estimated_input_tokens, estimated_output_tokens
         )
