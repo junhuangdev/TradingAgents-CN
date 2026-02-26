@@ -8,6 +8,7 @@ import pandas as pd
 from typing import Optional, Dict, Any
 import warnings
 from datetime import datetime
+import time
 
 # 导入日志模块
 from tradingagents.utils.logging_manager import get_logger
@@ -70,28 +71,56 @@ class AKShareProvider:
         """获取股票历史数据"""
         if not self.connected:
             return None
-        
-        try:
-            # 转换股票代码格式
-            if len(symbol) == 6:
-                symbol = symbol
-            else:
-                symbol = symbol.replace('.SZ', '').replace('.SS', '')
-            
-            # 获取数据
-            data = self.ak.stock_zh_a_hist(
-                symbol=symbol,
-                period="daily",
-                start_date=start_date.replace('-', '') if start_date else "20240101",
-                end_date=end_date.replace('-', '') if end_date else "20241231",
-                adjust=""
-            )
-            
-            return data
-            
-        except Exception as e:
-            logger.error(f"❌ AKShare获取股票数据失败: {e}")
-            return None
+
+        # 转换股票代码格式
+        if len(symbol) != 6:
+            symbol = symbol.replace('.SZ', '').replace('.SS', '')
+
+        start_date_fmt = start_date.replace('-', '') if start_date else "20240101"
+        end_date_fmt = end_date.replace('-', '') if end_date else "20241231"
+
+        retryable_error_markers = (
+            "remote disconnected",
+            "connection aborted",
+            "connection reset",
+            "unexpected_eof_while_reading",
+            "ssl",
+            "timed out",
+            "timeout",
+        )
+        max_attempts = 3
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                data = self.ak.stock_zh_a_hist(
+                    symbol=symbol,
+                    period="daily",
+                    start_date=start_date_fmt,
+                    end_date=end_date_fmt,
+                    adjust=""
+                )
+                if attempt > 1:
+                    logger.info(f"✅ AKShare重试成功: symbol={symbol}, attempt={attempt}")
+                return data
+            except Exception as e:
+                error_text = str(e)
+                lowered = error_text.lower()
+                retryable = any(marker in lowered for marker in retryable_error_markers)
+                logger.warning(
+                    f"⚠️ AKShare获取股票数据失败: symbol={symbol}, attempt={attempt}/{max_attempts}, "
+                    f"retryable={retryable}, error={error_text}"
+                )
+
+                if retryable and attempt < max_attempts:
+                    sleep_seconds = 0.5 * attempt
+                    time.sleep(sleep_seconds)
+                    continue
+
+                logger.error(
+                    "❌ AKShare获取股票数据失败（已终止重试）: "
+                    f"symbol={symbol}, start={start_date_fmt}, end={end_date_fmt}, error={error_text}"
+                )
+                return None
     
     def get_stock_info(self, symbol: str) -> Dict[str, Any]:
         """获取股票基本信息"""
