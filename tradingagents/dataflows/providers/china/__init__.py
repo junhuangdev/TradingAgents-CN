@@ -21,10 +21,10 @@ except ImportError:
 
 # 导入 Baostock 提供器
 try:
-    from .baostock import BaostockProvider
+    from .baostock import BaoStockProvider
     BAOSTOCK_AVAILABLE = True
 except ImportError:
-    BaostockProvider = None
+    BaoStockProvider = None
     BAOSTOCK_AVAILABLE = False
 
 # 导入基本面快照工具
@@ -40,9 +40,8 @@ __all__ = [
     'AKSHARE_AVAILABLE',
     'TushareProvider',
     'TUSHARE_AVAILABLE',
-    'BaostockProvider',
+    'BaoStockProvider',
     'BAOSTOCK_AVAILABLE',
     'get_fundamentals_snapshot',
     'FUNDAMENTALS_SNAPSHOT_AVAILABLE',
 ]
-

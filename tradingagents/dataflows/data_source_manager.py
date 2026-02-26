@@ -6,7 +6,7 @@
 
 import os
 import time
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Set
 from enum import Enum
 import warnings
 import pandas as pd
@@ -36,9 +36,18 @@ class DataSourceManager:
 
     def __init__(self):
         """初始化数据源管理器"""
+        self.disabled_sources: Set[ChinaDataSource] = set()
+        self.source_disable_reasons: Dict[ChinaDataSource, str] = {}
         self.default_source = self._get_default_source()
         self.available_sources = self._check_available_sources()
         self.current_source = self.default_source
+
+        if self.current_source not in self.available_sources and self.available_sources:
+            fallback_source = self.available_sources[0]
+            logger.warning(
+                f"⚠️ 默认数据源 {self.current_source.value} 不可用，自动切换到 {fallback_source.value}"
+            )
+            self.current_source = fallback_source
 
         logger.info(f"📊 数据源管理器初始化完成")
         logger.info(f"   默认数据源: {self.default_source.value}")
@@ -57,6 +66,71 @@ class DataSourceManager:
         }
 
         return source_mapping.get(env_source, ChinaDataSource.AKSHARE)
+
+    @staticmethod
+    def _normalize_env_value(value: Optional[str]) -> str:
+        """规范化环境变量值"""
+        if value is None:
+            return ""
+        return str(value).strip().strip('"').strip("'")
+
+    def _is_valid_token(self, token: Optional[str]) -> bool:
+        """判断 token 是否有效（非空且非占位符）"""
+        normalized = self._normalize_env_value(token)
+        if not normalized:
+            return False
+
+        lowered = normalized.lower()
+        placeholder_markers = (
+            "your_",
+            "your-",
+            "placeholder",
+            "_here",
+            "-here",
+        )
+        if any(marker in lowered for marker in placeholder_markers):
+            return False
+        return len(normalized) > 10
+
+    @staticmethod
+    def _is_feature_enabled(name: str, default: bool = True) -> bool:
+        """读取布尔开关环境变量"""
+        value = os.getenv(name)
+        if value is None:
+            return default
+        return value.strip().lower() in ("1", "true", "yes", "on")
+
+    @staticmethod
+    def _is_tushare_auth_error(message: str) -> bool:
+        """判断是否为 Tushare 鉴权错误"""
+        normalized = str(message or "").lower()
+        indicators = (
+            "token不对",
+            "invalid token",
+            "token is invalid",
+            "token error",
+            "权限",
+            "permission denied",
+        )
+        return any(indicator in normalized for indicator in indicators)
+
+    def _disable_source(self, source: ChinaDataSource, reason: str):
+        """将数据源在当前进程内禁用，避免重复失败"""
+        clean_reason = self._normalize_env_value(reason) or "未知原因"
+        self.source_disable_reasons[source] = clean_reason
+
+        if source in self.disabled_sources:
+            logger.warning(f"⚠️ 数据源 {source.value} 已禁用，原因: {clean_reason}")
+            return
+
+        self.disabled_sources.add(source)
+        if source in self.available_sources:
+            self.available_sources.remove(source)
+        logger.warning(f"🚫 已禁用数据源 {source.value}（本进程）: {clean_reason}")
+
+    def _is_source_usable(self, source: ChinaDataSource) -> bool:
+        """判断数据源是否可用且未被禁用"""
+        return source in self.available_sources and source not in self.disabled_sources
 
     # ==================== Tushare数据接口 ====================
 
@@ -191,16 +265,19 @@ class DataSourceManager:
         available = []
         
         # 检查Tushare
-        try:
-            import tushare as ts
-            token = os.getenv('TUSHARE_TOKEN')
-            if token:
+        tushare_enabled = self._is_feature_enabled("TUSHARE_ENABLED", default=True)
+        tushare_token = os.getenv("TUSHARE_TOKEN", "")
+        if not tushare_enabled:
+            logger.info("ℹ️ Tushare数据源已禁用: TUSHARE_ENABLED=false")
+        elif not self._is_valid_token(tushare_token):
+            logger.warning("⚠️ Tushare数据源不可用: TUSHARE_TOKEN为空或占位值")
+        else:
+            try:
+                import tushare as ts  # noqa: F401
                 available.append(ChinaDataSource.TUSHARE)
                 logger.info("✅ Tushare数据源可用")
-            else:
-                logger.warning("⚠️ Tushare数据源不可用: 未设置TUSHARE_TOKEN")
-        except ImportError:
-            logger.warning("⚠️ Tushare数据源不可用: 库未安装")
+            except ImportError:
+                logger.warning("⚠️ Tushare数据源不可用: 库未安装")
         
         # 检查AKShare
         try:
@@ -372,6 +449,11 @@ class DataSourceManager:
         """使用Tushare获取数据 - 直接调用适配器，避免循环调用"""
         logger.debug(f"📊 [Tushare] 调用参数: symbol={symbol}, start_date={start_date}, end_date={end_date}")
 
+        if not self._is_source_usable(ChinaDataSource.TUSHARE):
+            reason = self.source_disable_reasons.get(ChinaDataSource.TUSHARE, "未启用或不可用")
+            logger.warning(f"⚠️ 跳过Tushare调用: {reason}")
+            return f"❌ Tushare不可用: {reason}"
+
         # 添加详细的股票代码追踪日志
         logger.info(f"🔍 [股票代码追踪] _get_tushare_data 接收到的股票代码: '{symbol}' (类型: {type(symbol)})")
         logger.info(f"🔍 [股票代码追踪] 股票代码长度: {len(str(symbol))}")
@@ -387,6 +469,10 @@ class DataSourceManager:
             logger.info(f"🔍 [DataSourceManager详细日志] 开始调用tushare_adapter...")
 
             adapter = get_tushare_adapter()
+            if adapter is None or getattr(adapter, "provider", None) is None:
+                self._disable_source(ChinaDataSource.TUSHARE, "Tushare适配器不可用")
+                return f"❌ 未获取到{symbol}的有效数据"
+
             data = adapter.get_stock_data(symbol, start_date, end_date)
 
             if data is not None and not data.empty:
@@ -420,6 +506,11 @@ class DataSourceManager:
 
                 return result
             else:
+                auth_error = self._extract_tushare_auth_error(adapter)
+                if auth_error:
+                    self._disable_source(ChinaDataSource.TUSHARE, auth_error)
+                    result = f"❌ Tushare鉴权失败: {auth_error}"
+                    return result
                 result = f"❌ 未获取到{symbol}的有效数据"
 
             duration = time.time() - start_time
@@ -436,6 +527,9 @@ class DataSourceManager:
             logger.error(f"❌ [Tushare] 调用失败: {e}, 耗时={duration:.2f}s", exc_info=True)
             logger.error(f"❌ [DataSourceManager详细日志] 异常类型: {type(e).__name__}")
             logger.error(f"❌ [DataSourceManager详细日志] 异常信息: {str(e)}")
+            if self._is_tushare_auth_error(str(e)):
+                self._disable_source(ChinaDataSource.TUSHARE, str(e))
+                return f"❌ Tushare鉴权失败: {e}"
             import traceback
             logger.error(f"❌ [DataSourceManager详细日志] 异常堆栈: {traceback.format_exc()}")
             raise
@@ -541,6 +635,20 @@ class DataSourceManager:
             logger.error(f"❌ 获取成交量失败: {e}")
             return 0
 
+    def _extract_tushare_auth_error(self, adapter: Any) -> Optional[str]:
+        """从适配器中提取 Tushare 鉴权错误信息"""
+        provider = getattr(adapter, "provider", None)
+        if provider is None:
+            return None
+
+        last_error = str(getattr(provider, "last_error", "") or "")
+        auth_failed = bool(getattr(provider, "auth_failed", False))
+        if auth_failed:
+            return last_error or "Tushare token鉴权失败"
+        if self._is_tushare_auth_error(last_error):
+            return last_error
+        return None
+
     def _try_fallback_sources(self, symbol: str, start_date: str, end_date: str) -> str:
         """尝试备用数据源 - 避免递归调用"""
         logger.error(f"🔄 {self.current_source.value}失败，尝试备用数据源...")
@@ -553,6 +661,12 @@ class DataSourceManager:
         ]
 
         for source in fallback_order:
+            if source in self.disabled_sources:
+                logger.info(
+                    f"⏭️ 跳过已禁用数据源: {source.value}，原因: {self.source_disable_reasons.get(source, '未知')}"
+                )
+                continue
+
             if source != self.current_source and source in self.available_sources:
                 try:
                     logger.info(f"🔄 尝试备用数据源: {source.value}")
@@ -624,13 +738,18 @@ class DataSourceManager:
         available_sources = self.available_sources.copy()
 
         # 移除当前数据源
-        if self.current_source.value in available_sources:
-            available_sources.remove(self.current_source.value)
+        if self.current_source in available_sources:
+            available_sources.remove(self.current_source)
 
         # 尝试所有备用数据源
-        for source_name in available_sources:
+        for source in available_sources:
+            if source in self.disabled_sources:
+                logger.info(
+                    f"⏭️ [股票信息] 跳过已禁用数据源: {source.value}，原因: {self.source_disable_reasons.get(source, '未知')}"
+                )
+                continue
             try:
-                source = ChinaDataSource(source_name)
+                source_name = source.value
                 logger.info(f"🔄 [股票信息] 尝试备用数据源: {source_name}")
 
                 # 根据数据源类型获取股票信息

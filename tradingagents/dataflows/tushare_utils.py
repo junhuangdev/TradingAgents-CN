@@ -51,6 +51,8 @@ class TushareProvider:
         self.connected = False
         self.enable_cache = enable_cache and CACHE_AVAILABLE
         self.api = None
+        self.auth_failed = False
+        self.last_error = ""
         
         # 初始化缓存管理器
         self.cache_manager = None
@@ -63,6 +65,13 @@ class TushareProvider:
                 logger.warning(f"⚠️ 缓存管理器初始化失败: {e}")
                 self.enable_cache = False
 
+        # 开关：允许显式禁用 Tushare
+        tushare_enabled = os.getenv("TUSHARE_ENABLED", "true").strip().lower() in ("1", "true", "yes", "on")
+        if not tushare_enabled:
+            self.last_error = "TUSHARE_ENABLED=false，已禁用Tushare"
+            logger.info("ℹ️ Tushare已禁用（TUSHARE_ENABLED=false）")
+            return
+
         # 获取API token（使用强健的配置解析）
         if not token:
             try:
@@ -72,7 +81,9 @@ class TushareProvider:
                 # 回退到原始方法
                 token = os.getenv('TUSHARE_TOKEN', '')
 
-        if not token:
+        token = self._normalize_token(token)
+        if not self._is_valid_token(token):
+            self.last_error = "TUSHARE_TOKEN为空、占位值或格式无效"
             logger.warning("⚠️ 未找到Tushare API token，请设置TUSHARE_TOKEN环境变量")
             return
 
@@ -82,11 +93,55 @@ class TushareProvider:
                 ts.set_token(token)
                 self.api = ts.pro_api()
                 self.connected = True
+                self.auth_failed = False
+                self.last_error = ""
                 logger.info("✅ Tushare API连接成功")
             except Exception as e:
+                self.last_error = str(e)
+                if self._is_auth_error(self.last_error):
+                    self.auth_failed = True
                 logger.error(f"❌ Tushare API连接失败: {e}")
         else:
+            self.last_error = "Tushare库不可用"
             logger.error("❌ Tushare库不可用")
+
+    @staticmethod
+    def _normalize_token(token: Optional[str]) -> str:
+        """规范化 token 字符串"""
+        if token is None:
+            return ""
+        return str(token).strip().strip('"').strip("'")
+
+    @classmethod
+    def _is_valid_token(cls, token: Optional[str]) -> bool:
+        """判断 token 是否有效（非空且非占位符）"""
+        normalized = cls._normalize_token(token)
+        if not normalized:
+            return False
+        lowered = normalized.lower()
+        placeholder_markers = (
+            "your_",
+            "your-",
+            "placeholder",
+            "_here",
+            "-here",
+        )
+        if any(marker in lowered for marker in placeholder_markers):
+            return False
+        return len(normalized) > 10
+
+    @staticmethod
+    def _is_auth_error(message: str) -> bool:
+        """判断是否为鉴权失败信息"""
+        normalized = str(message or "").lower()
+        indicators = (
+            "token不对",
+            "invalid token",
+            "token is invalid",
+            "permission denied",
+            "权限",
+        )
+        return any(indicator in normalized for indicator in indicators)
     
     def get_stock_list(self) -> pd.DataFrame:
         """
@@ -170,6 +225,7 @@ class TushareProvider:
         logger.info(f"🔍 [Tushare详细日志] API对象: {type(self.api).__name__ if self.api else 'None'}")
 
         if not self.connected:
+            self.last_error = "Tushare未连接"
             logger.error(f"❌ [Tushare详细日志] Tushare未连接，无法获取数据")
             return pd.DataFrame()
 
@@ -219,6 +275,9 @@ class TushareProvider:
                 logger.error(f"❌ [Tushare详细日志] API调用异常，耗时: {api_duration:.3f}秒")
                 logger.error(f"❌ [Tushare详细日志] API异常类型: {type(api_error).__name__}")
                 logger.error(f"❌ [Tushare详细日志] API异常信息: {str(api_error)}")
+                self.last_error = str(api_error)
+                if self._is_auth_error(self.last_error):
+                    self.auth_failed = True
                 raise api_error
 
             # 详细记录返回数据的信息
@@ -282,6 +341,9 @@ class TushareProvider:
             logger.error(f"❌ 获取{symbol}数据失败: {e}")
             logger.error(f"❌ [Tushare详细日志] 异常类型: {type(e).__name__}")
             logger.error(f"❌ [Tushare详细日志] 异常信息: {str(e)}")
+            self.last_error = str(e)
+            if self._is_auth_error(self.last_error):
+                self.auth_failed = True
             import traceback
             logger.error(f"❌ [Tushare详细日志] 异常堆栈: {traceback.format_exc()}")
             return pd.DataFrame()
