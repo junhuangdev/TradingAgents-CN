@@ -1228,31 +1228,63 @@ def main():
                             progress_callback=progress_callback
                         )
 
-                        # 标记分析完成并保存结果（不访问session state）
-                        async_tracker.mark_completed("✅ 分析成功完成！", results=results)
+                        result_success = not (
+                            isinstance(results, dict) and results.get("success") is False
+                        )
 
-                        # 自动保存分析结果到历史记录
-                        try:
-                            from components.analysis_results import save_analysis_result
-                            
-                            save_success = save_analysis_result(
-                                analysis_id=analysis_id,
-                                stock_symbol=form_data['stock_symbol'],
-                                analysts=form_data['analysts'],
-                                research_depth=form_data['research_depth'],
-                                result_data=results,
-                                status="completed"
-                            )
-                            
-                            if save_success:
-                                logger.info(f"💾 [后台保存] 分析结果已保存到历史记录: {analysis_id}")
-                            else:
-                                logger.warning(f"⚠️ [后台保存] 保存失败: {analysis_id}")
-                                
-                        except Exception as save_error:
-                            logger.error(f"❌ [后台保存] 保存异常: {save_error}")
+                        if result_success:
+                            # 标记分析完成并保存结果（不访问session state）
+                            async_tracker.mark_completed("✅ 分析成功完成！", results=results)
 
-                        logger.info(f"✅ [分析完成] 股票分析成功完成: {analysis_id}")
+                            # 自动保存分析结果到历史记录
+                            try:
+                                from components.analysis_results import save_analysis_result
+
+                                save_success = save_analysis_result(
+                                    analysis_id=analysis_id,
+                                    stock_symbol=form_data['stock_symbol'],
+                                    analysts=form_data['analysts'],
+                                    research_depth=form_data['research_depth'],
+                                    result_data=results,
+                                    status="completed"
+                                )
+
+                                if save_success:
+                                    logger.info(f"💾 [后台保存] 分析结果已保存到历史记录: {analysis_id}")
+                                else:
+                                    logger.warning(f"⚠️ [后台保存] 保存失败: {analysis_id}")
+
+                            except Exception as save_error:
+                                logger.error(f"❌ [后台保存] 保存异常: {save_error}")
+
+                            logger.info(f"✅ [分析完成] 股票分析成功完成: {analysis_id}")
+                        else:
+                            error_message = "分析返回失败"
+                            if isinstance(results, dict):
+                                error_message = (
+                                    results.get("error")
+                                    or results.get("message")
+                                    or results.get("suggestion")
+                                    or error_message
+                                )
+                            async_tracker.mark_failed(str(error_message))
+
+                            try:
+                                from components.analysis_results import save_analysis_result
+
+                                save_analysis_result(
+                                    analysis_id=analysis_id,
+                                    stock_symbol=form_data['stock_symbol'],
+                                    analysts=form_data['analysts'],
+                                    research_depth=form_data['research_depth'],
+                                    result_data=results,
+                                    status="failed"
+                                )
+                                logger.info(f"💾 [失败记录] 分析失败记录已保存: {analysis_id}")
+                            except Exception as save_error:
+                                logger.error(f"❌ [失败记录] 保存异常: {save_error}")
+
+                            logger.error(f"❌ [分析失败] {analysis_id}: {error_message}")
 
                     except Exception as e:
                         # 标记分析失败（不访问session state）
