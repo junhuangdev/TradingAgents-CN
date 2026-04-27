@@ -37,7 +37,7 @@ class ChatDeepSeek(ChatOpenAI):
     
     def __init__(
         self,
-        model: str = "deepseek-chat",
+        model: str = "deepseek-v4-flash",
         api_key: Optional[str] = None,
         base_url: str = "https://api.deepseek.com",
         temperature: float = 0.1,
@@ -46,9 +46,9 @@ class ChatDeepSeek(ChatOpenAI):
     ):
         """
         初始化DeepSeek适配器
-        
+
         Args:
-            model: 模型名称，默认为deepseek-chat
+            model: 模型名称，默认为deepseek-v4-flash
             api_key: API密钥，如果不提供则从环境变量DEEPSEEK_API_KEY获取
             base_url: API基础URL
             temperature: 温度参数

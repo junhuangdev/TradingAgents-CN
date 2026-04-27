@@ -247,8 +247,8 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
                 config["quick_think_llm"] = "qwen-turbo"  # 使用最快模型
                 config["deep_think_llm"] = "qwen-plus"
             elif llm_provider == "deepseek":
-                config["quick_think_llm"] = "deepseek-chat"  # DeepSeek只有一个模型
-                config["deep_think_llm"] = "deepseek-chat"
+                config["quick_think_llm"] = "deepseek-v4-flash"
+                config["deep_think_llm"] = "deepseek-v4-flash"
         elif research_depth == 2:  # 2级 - 基础分析
             config["max_debate_rounds"] = 1
             config["max_risk_discuss_rounds"] = 1
@@ -258,8 +258,8 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
                 config["quick_think_llm"] = "qwen-plus"
                 config["deep_think_llm"] = "qwen-plus"
             elif llm_provider == "deepseek":
-                config["quick_think_llm"] = "deepseek-chat"
-                config["deep_think_llm"] = "deepseek-chat"
+                config["quick_think_llm"] = "deepseek-v4-flash"
+                config["deep_think_llm"] = "deepseek-v4-flash"
             elif llm_provider == "openai":
                 config["quick_think_llm"] = llm_model
                 config["deep_think_llm"] = llm_model
@@ -284,8 +284,8 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
                 config["quick_think_llm"] = "qwen-plus"
                 config["deep_think_llm"] = "qwen3-max"
             elif llm_provider == "deepseek":
-                config["quick_think_llm"] = "deepseek-chat"
-                config["deep_think_llm"] = "deepseek-chat"
+                config["quick_think_llm"] = "deepseek-v4-flash"
+                config["deep_think_llm"] = "deepseek-v4-pro"
         elif research_depth == 4:  # 4级 - 深度分析
             config["max_debate_rounds"] = 2
             config["max_risk_discuss_rounds"] = 2
@@ -295,8 +295,8 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
                 config["quick_think_llm"] = "qwen-plus"
                 config["deep_think_llm"] = "qwen3-max"
             elif llm_provider == "deepseek":
-                config["quick_think_llm"] = "deepseek-chat"
-                config["deep_think_llm"] = "deepseek-chat"
+                config["quick_think_llm"] = "deepseek-v4-flash"
+                config["deep_think_llm"] = "deepseek-v4-pro"
         else:  # 5级 - 全面分析
             config["max_debate_rounds"] = 3
             config["max_risk_discuss_rounds"] = 3
@@ -306,8 +306,8 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
                 config["quick_think_llm"] = "qwen3-max"
                 config["deep_think_llm"] = "qwen3-max"
             elif llm_provider == "deepseek":
-                config["quick_think_llm"] = "deepseek-chat"
-                config["deep_think_llm"] = "deepseek-chat"
+                config["quick_think_llm"] = "deepseek-v4-pro"
+                config["deep_think_llm"] = "deepseek-v4-pro"
 
         # 根据LLM提供商设置不同的配置
         if llm_provider == "dashscope":

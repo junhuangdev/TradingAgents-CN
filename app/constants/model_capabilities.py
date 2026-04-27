@@ -185,13 +185,30 @@ DEFAULT_MODEL_CAPABILITIES: Dict[str, Dict[str, Any]] = {
     },
     
     # ==================== DeepSeek ====================
+    "deepseek-v4-flash": {
+        "capability_level": 3,
+        "suitable_roles": [ModelRole.BOTH],
+        "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.COST_EFFECTIVE],
+        "recommended_depths": ["快速", "基础", "标准", "深度"],
+        "performance_metrics": {"speed": 5, "cost": 5, "quality": 4},
+        "description": "DeepSeek V4 Flash，1M 上下文，性价比首选"
+    },
+    "deepseek-v4-pro": {
+        "capability_level": 4,
+        "suitable_roles": [ModelRole.DEEP_ANALYSIS, ModelRole.BOTH],
+        "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.REASONING],
+        "recommended_depths": ["标准", "深度", "全面"],
+        "performance_metrics": {"speed": 3, "cost": 3, "quality": 5},
+        "description": "DeepSeek V4 Pro，1M 上下文，强推理"
+    },
+    # 注：deepseek-chat / deepseek-reasoner 是 legacy 名，2026-07-24 后停止可用
     "deepseek-chat": {
         "capability_level": 3,
         "suitable_roles": [ModelRole.BOTH],
         "features": [ModelFeature.TOOL_CALLING, ModelFeature.LONG_CONTEXT, ModelFeature.COST_EFFECTIVE],
         "recommended_depths": ["基础", "标准", "深度"],
         "performance_metrics": {"speed": 4, "cost": 5, "quality": 4},
-        "description": "DeepSeek Chat，性价比高"
+        "description": "DeepSeek Chat (legacy，将于 2026-07-24 下线，建议改用 deepseek-v4-flash)"
     },
     
     # ==================== 百度文心 (Qianfan) ====================
