@@ -239,7 +239,15 @@ class ConfigManager:
                 ),
                 ModelConfig(
                     provider="deepseek",
-                    model_name="deepseek-chat",
+                    model_name="deepseek-v4-flash",
+                    api_key="",
+                    max_tokens=8000,
+                    temperature=0.7,
+                    enabled=False
+                ),
+                ModelConfig(
+                    provider="deepseek",
+                    model_name="deepseek-v4-pro",
                     api_key="",
                     max_tokens=8000,
                     temperature=0.7,
@@ -256,9 +264,13 @@ class ConfigManager:
                 PricingConfig("dashscope", "qwen-plus-latest", 0.004, 0.012, "CNY"),
                 PricingConfig("dashscope", "qwen-max", 0.02, 0.06, "CNY"),
 
-                # DeepSeek定价 (人民币) - 2025年最新价格
-                PricingConfig("deepseek", "deepseek-chat", 0.0014, 0.0028, "CNY"),
-                PricingConfig("deepseek", "deepseek-coder", 0.0014, 0.0028, "CNY"),
+                # DeepSeek定价 (美元，per 1k tokens) - 2026-04-24 V4 上线后官方价
+                # cache miss 价；缓存命中后输入价为 1/10
+                PricingConfig("deepseek", "deepseek-v4-flash", 0.00014, 0.00028, "USD"),
+                PricingConfig("deepseek", "deepseek-v4-pro", 0.000435, 0.00087, "USD"),
+                # legacy 名（2026-07-24 后下线）：当前过渡期被映射到 v4-flash 非思考模式
+                PricingConfig("deepseek", "deepseek-chat", 0.00014, 0.00028, "USD"),
+                PricingConfig("deepseek", "deepseek-reasoner", 0.00014, 0.00028, "USD"),
 
                 # OpenAI定价 (美元)
                 PricingConfig("openai", "gpt-3.5-turbo", 0.0015, 0.002, "USD"),
