@@ -752,11 +752,15 @@ class TradingAgentsGraph:
 
                     self._send_progress_update(chunk, progress_callback)
                     # 累积状态更新
-                    if final_state is None:
-                        final_state = init_agent_state.copy()
-                    for node_name, node_update in chunk.items():
-                        if not node_name.startswith('__'):
-                            final_state.update(node_update)
+                    if args.get("stream_mode") == "values":
+                        # values 模式：chunk 即完整状态
+                        final_state = chunk
+                    else:
+                        if final_state is None:
+                            final_state = init_agent_state.copy()
+                        for node_name, node_update in chunk.items():
+                            if not node_name.startswith('__'):
+                                final_state.update(node_update)
             else:
                 # 原有的invoke模式（也需要计时）
                 logger.info("⏱️ 使用 invoke 模式执行分析（无进度回调）")
@@ -779,11 +783,15 @@ class TradingAgentsGraph:
                             break
 
                     # 累积状态更新
-                    if final_state is None:
-                        final_state = init_agent_state.copy()
-                    for node_name, node_update in chunk.items():
-                        if not node_name.startswith('__'):
-                            final_state.update(node_update)
+                    if args.get("stream_mode") == "values":
+                        # values 模式：chunk 即完整状态
+                        final_state = chunk
+                    else:
+                        if final_state is None:
+                            final_state = init_agent_state.copy()
+                        for node_name, node_update in chunk.items():
+                            if not node_name.startswith('__'):
+                                final_state.update(node_update)
 
         # 记录最后一个节点的时间
         if current_node_name and current_node_start:
