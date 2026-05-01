@@ -221,7 +221,7 @@ def render_sidebar():
             index=["dashscope", "deepseek", "google", "openai", "openrouter", "siliconflow", "custom_openai", "qianfan"].index(st.session_state.llm_provider) if st.session_state.llm_provider in ["dashscope", "deepseek", "google", "openai", "openrouter", "siliconflow", "custom_openai", "qianfan"] else 0,
             format_func=lambda x: {
                 "dashscope": "🇨🇳 阿里百炼",
-                "deepseek": "🚀 DeepSeek V3",
+                "deepseek": "🚀 DeepSeek V4",
                 "google": "🌟 Google AI",
                 "openai": "🤖 OpenAI",
                 "openrouter": "🌐 OpenRouter",
@@ -312,7 +312,7 @@ def render_sidebar():
             save_model_selection(st.session_state.llm_provider, st.session_state.model_category, llm_model)
 
         elif llm_provider == "deepseek":
-            deepseek_options = ["deepseek-chat"]
+            deepseek_options = ["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat"]
 
             # 获取当前选择的索引
             current_index = 0
@@ -324,9 +324,11 @@ def render_sidebar():
                 options=deepseek_options,
                 index=current_index,
                 format_func=lambda x: {
-                    "deepseek-chat": "DeepSeek Chat - 通用对话模型，适合股票分析"
+                    "deepseek-v4-flash": "DeepSeek V4 Flash - 性价比首选 (1M)",
+                    "deepseek-v4-pro": "DeepSeek V4 Pro - 强推理 (1M)",
+                    "deepseek-chat": "DeepSeek Chat (legacy, 2026-07-24 下线)"
                 }[x],
-                help="选择用于分析的DeepSeek模型",
+                help="V4 系列为官方推荐；deepseek-chat 在 2026-07-24 后停止可用",
                 key="deepseek_model_select"
             )
 
