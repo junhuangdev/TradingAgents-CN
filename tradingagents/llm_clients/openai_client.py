@@ -8,10 +8,48 @@ from .validators import validate_model
 
 
 class NormalizedChatOpenAI(ChatOpenAI):
-    """ChatOpenAI wrapper that normalizes typed content blocks to text."""
+    """ChatOpenAI wrapper that normalizes typed content blocks to text.
+
+    Also re-attaches `reasoning_content` (saved in AIMessage.additional_kwargs by
+    DeepSeek V4 thinking-mode replies) onto outbound assistant messages that
+    carry tool_calls. DeepSeek's V4 API rejects such turns with HTTP 400 unless
+    the reasoning_content is echoed back.
+    """
 
     def invoke(self, input, config=None, **kwargs):
         return normalize_content(super().invoke(input, config, **kwargs))
+
+    def _create_chat_result(self, response, generation_info=None):
+        result = super()._create_chat_result(response, generation_info)
+        try:
+            response_dict = response if isinstance(response, dict) else response.model_dump()
+            choices = response_dict.get("choices") or []
+        except Exception:
+            return result
+        for gen, choice in zip(result.generations, choices):
+            rc = ((choice or {}).get("message") or {}).get("reasoning_content")
+            if rc and hasattr(gen, "message") and hasattr(gen.message, "additional_kwargs"):
+                gen.message.additional_kwargs["reasoning_content"] = rc
+        return result
+
+    def _get_request_payload(self, input_, *, stop=None, **kwargs):
+        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
+        try:
+            messages_in = self._convert_input(input_).to_messages()
+        except Exception:
+            return payload
+        messages_out = payload.get("messages")
+        if not isinstance(messages_out, list) or len(messages_out) != len(messages_in):
+            return payload
+        for src, dst in zip(messages_in, messages_out):
+            if not isinstance(dst, dict):
+                continue
+            if dst.get("role") != "assistant" or not dst.get("tool_calls"):
+                continue
+            rc = (getattr(src, "additional_kwargs", None) or {}).get("reasoning_content")
+            if rc:
+                dst["reasoning_content"] = rc
+        return payload
 
 
 _PASSTHROUGH_KWARGS = (
