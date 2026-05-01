@@ -1611,10 +1611,7 @@ class DataSourceManager:
                 logger.info(f"🔄 尝试备用数据源获取股票信息: {source_name}")
 
                 # 根据数据源类型获取股票信息
-                if source == ChinaDataSource.TUSHARE:
-                    # 🔥 直接调用 Tushare 适配器，避免循环调用
-                    result = self._get_tushare_stock_info(symbol)
-                elif source == ChinaDataSource.AKSHARE:
+                if source == ChinaDataSource.AKSHARE:
                     result = self._get_akshare_stock_info(symbol)
                 elif source == ChinaDataSource.BAOSTOCK:
                     result = self._get_baostock_stock_info(symbol)
@@ -1649,61 +1646,100 @@ class DataSourceManager:
     def _get_akshare_stock_info(self, symbol: str) -> Dict:
         """使用AKShare获取股票基本信息
 
-        🔥 重要：AKShare 需要区分股票和指数
-        - 对于 000001，如果不加后缀，会被识别为"深圳成指"（指数）
-        - 对于股票，需要使用完整代码（如 sz000001 或 sh600000）
+        AKShare 的 stock_individual_info_em 期望传入纯数字代码（如 "601288"）。
+        当 eastmoney 对其超长 fields 列表请求断连时，回退到直连 push2 短字段接口，
+        最后兜底走 stock_info_a_code_name 全表查名。
         """
+        info_default = {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'akshare'}
+
         try:
             import akshare as ak
 
-            # 🔥 转换为 AKShare 格式的股票代码
-            # AKShare 的 stock_individual_info_em 需要使用 "sz000001" 或 "sh600000" 格式
-            if symbol.startswith('6'):
-                # 上海股票：600000 -> sh600000
-                akshare_symbol = f"sh{symbol}"
-            elif symbol.startswith(('0', '3', '2')):
-                # 深圳股票：000001 -> sz000001
-                akshare_symbol = f"sz{symbol}"
-            elif symbol.startswith(('8', '4')):
-                # 北京股票：830000 -> bj830000
-                akshare_symbol = f"bj{symbol}"
-            else:
-                # 其他情况，直接使用原始代码
-                akshare_symbol = symbol
-
-            logger.debug(f"📊 [AKShare股票信息] 原始代码: {symbol}, AKShare格式: {akshare_symbol}")
-
-            # 尝试获取个股信息
-            stock_info = ak.stock_individual_info_em(symbol=akshare_symbol)
+            try:
+                stock_info = ak.stock_individual_info_em(symbol=symbol)
+            except Exception as e:
+                logger.warning(f"⚠️ [AKShare股票信息] stock_individual_info_em 调用失败({symbol}): {e}，回退到腾讯行情")
+                stock_info = None
 
             if stock_info is not None and not stock_info.empty:
-                # 转换为字典格式
                 info = {'symbol': symbol, 'source': 'akshare'}
-
-                # 提取股票名称
                 name_row = stock_info[stock_info['item'] == '股票简称']
                 if not name_row.empty:
-                    stock_name = name_row['value'].iloc[0]
-                    info['name'] = stock_name
-                    logger.info(f"✅ [AKShare股票信息] {symbol} -> {stock_name}")
+                    info['name'] = str(name_row['value'].iloc[0])
+                    logger.info(f"✅ [AKShare股票信息] {symbol} -> {info['name']}")
                 else:
                     info['name'] = f'股票{symbol}'
                     logger.warning(f"⚠️ [AKShare股票信息] 未找到股票简称: {symbol}")
-
-                # 提取其他信息
-                info['area'] = '未知'  # AKShare没有地区信息
-                info['industry'] = '未知'  # 可以通过其他API获取
-                info['market'] = '未知'  # 可以根据股票代码推断
-                info['list_date'] = '未知'  # 可以通过其他API获取
-
+                info['area'] = '未知'
+                info['industry'] = '未知'
+                info['market'] = '未知'
+                info['list_date'] = '未知'
                 return info
-            else:
-                logger.warning(f"⚠️ [AKShare股票信息] 返回空数据: {symbol}")
-                return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'akshare'}
+
+            stock_name = self._fetch_eastmoney_short_name(symbol)
+            if stock_name:
+                logger.info(f"✅ [AKShare股票信息-腾讯行情] {symbol} -> {stock_name}")
+                return {
+                    'symbol': symbol,
+                    'name': stock_name,
+                    'source': 'akshare',
+                    'area': '未知', 'industry': '未知', 'market': '未知', 'list_date': '未知',
+                }
+
+            try:
+                df = ak.stock_info_a_code_name()
+                row = df[df['code'] == symbol]
+                if not row.empty:
+                    stock_name = str(row['name'].iloc[0])
+                    logger.info(f"✅ [AKShare股票信息-降级code_name] {symbol} -> {stock_name}")
+                    return {
+                        'symbol': symbol,
+                        'name': stock_name,
+                        'source': 'akshare',
+                        'area': '未知', 'industry': '未知', 'market': '未知', 'list_date': '未知',
+                    }
+            except Exception as e:
+                logger.warning(f"⚠️ [AKShare股票信息] stock_info_a_code_name 也失败: {e}")
+
+            logger.warning(f"⚠️ [AKShare股票信息] 所有AKShare路径都拿不到名称: {symbol}")
+            return info_default
 
         except Exception as e:
             logger.error(f"❌ [股票信息] AKShare获取失败: {symbol}, 错误: {e}")
-            return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'akshare', 'error': str(e)}
+            return {**info_default, 'error': str(e)}
+
+    def _fetch_eastmoney_short_name(self, symbol: str) -> Optional[str]:
+        """通过腾讯行情接口拿股票简称。
+
+        Tencent gtimg 接口稳定、不依赖 eastmoney，返回 GBK 编码字符串如：
+        v_sh601288="1~农业银行~601288~6.92~..."
+        """
+        try:
+            import urllib.request
+            if symbol.startswith('6') or symbol.startswith('5'):
+                code = f"sh{symbol}"
+            elif symbol.startswith(('0', '3', '2')):
+                code = f"sz{symbol}"
+            elif symbol.startswith(('8', '4')):
+                code = f"bj{symbol}"
+            else:
+                code = symbol
+            url = f"https://qt.gtimg.cn/q={code}"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                raw = resp.read()
+            text = raw.decode('gbk', errors='ignore')
+            payload = text.split('"', 2)
+            if len(payload) < 3:
+                return None
+            parts = payload[1].split('~')
+            if len(parts) < 2:
+                return None
+            name = parts[1].strip()
+            return name or None
+        except Exception as e:
+            logger.debug(f"腾讯行情查询失败 {symbol}: {e}")
+            return None
 
     def _get_baostock_stock_info(self, symbol: str) -> Dict:
         """使用BaoStock获取股票基本信息"""
